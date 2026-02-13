@@ -1,3 +1,4 @@
+from django.db import transaction
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
@@ -27,52 +28,89 @@ class UsuarioSesionViewSet(viewsets.ModelViewSet):
     serializer_class = UsuarioSesionSerializer
     lookup_field = 'token' 
 
-    def create(self, request, *args, **kwargs):
-        """
-        Sobrescribimos el create para asegurarnos de que la respuesta 
-        sea limpia y solo contenga lo que el serializer dice.
-        """
-        response = super().create(request, *args, **kwargs)
-        return response
+    def get_permissions(self):
+    # Permitimos create, answers, finalizar, matches y retrieve (ver una sesión)
+        if self.action in ['create', 'answers', 'finalizar_test', 'matches', 'retrieve']:
+            return [AllowAny()]
+        return [IsAdminUser()]
 
-    @action(detail=True, methods=['post'])
+    @action(detail=False, methods=['post'], url_path='answers')
+    def answers(self, request):
+        """
+        PUNTO CLAVE: Recibe el array de respuestas de React.
+        Payload: { "session_id": "token_o_id", "answers": [...] }
+        """
+        session_token = request.data.get('session_id')
+        respuestas_data = request.data.get('answers', [])
+
+        # Buscamos la sesión por token (que es lo que React suele tener)
+        sesion = UsuarioSesion.objects.filter(token=session_token).first()
+        if not sesion:
+            return Response({"error": "Sesión no encontrada"}, status=404)
+
+        try:
+            with transaction.atomic():
+                for item in respuestas_data:
+                    UsuarioRespuesta.objects.update_or_create(
+                        sesion=sesion,
+                        pregunta_id=item['pregunta_id'],
+                        defaults={'valor': item['valor']}
+                    )
+            return Response({"status": "respuestas_guardadas"}, status=200)
+        except Exception as e:
+            return Response({"error": str(e)}, status=400)
+
+    @action(detail=True, methods=['post'], url_path='finalizar')
     def finalizar_test(self, request, token=None):
-        # 1. Obtenemos la sesión usando el token de la URL
+        """
+        Calcula resultados finales y marca la sesión como completada.
+        """
         sesion = self.get_object()
-        
-        # 2. Recuperamos todas las respuestas asociadas a esta sesión
         respuestas_queryset = sesion.respuestas.all()
         
         if not respuestas_queryset.exists():
-            return Response({"error": "No hay respuestas registradas para esta sesión"}, status=400)
+            return Response({"error": "No hay respuestas para calcular"}, status=400)
 
-        # 3. Calcular posición del usuario usando la lógica de utils.py
         posX, posY = calcular_posicion(respuestas_queryset)
         
-        # 4. Guardar resultados en la base de datos y marcar como completado
         sesion.resultado_x = posX
         sesion.resultado_y = posY
         sesion.completado = True
         sesion.save()
 
-        # 5. Obtener el ranking de compatibilidad con los partidos
         ranking = obtener_ranking_partidos(posX, posY)
 
-        # 6. Devolver la respuesta final al frontend
         return Response({
             "status": "finalizado",
-            "resultados": {
-                "token": sesion.token,
-                "x": float(posX),
-                "y": float(posY)
-            },
+            "token": sesion.token,
+            "resultados": {"x": float(posX), "y": float(posY)},
             "ranking": ranking
         })
     
-    def get_permissions(self):
-        if self.action == 'create':
-            return [AllowAny()]
-        return [IsAdminUser()]
+    # 1. Obtener afinidades (Ranking)
+    @action(detail=True, methods=['get'], url_path='matches')
+    def matches(self, request, token=None):
+        sesion = self.get_object()
+        
+        if not sesion.completado:
+            return Response({"error": "El quiz no ha sido finalizado"}, status=400)
+
+        ranking = obtener_ranking_partidos(sesion.resultado_x, sesion.resultado_y)
+        return Response(ranking)
+
+    # 2. Vincular sesión anónima a un usuario
+    @action(detail=False, methods=['post'], url_path='link-session')
+    def link_session(self, request):
+        token = request.data.get('session_id')
+        usuario_id = request.data.get('usuario_id')
+        
+        sesion = UsuarioSesion.objects.filter(token=token).first()
+        if sesion and not sesion.usuario:
+            sesion.usuario_id = usuario_id
+            sesion.save()
+            return Response({"status": "vínculo exitoso"})
+        
+        return Response({"error": "No se pudo vincular"}, status=400)
 
 class UsuarioRespuestaViewSet(viewsets.ModelViewSet):
     queryset = UsuarioRespuesta.objects.all()
@@ -85,7 +123,7 @@ class MyTokenObtainPairView(TokenObtainPairView):
 class RespuestaPartidoViewSet(viewsets.ModelViewSet):
     queryset = PartidoRespuesta.objects.all()
     serializer_class = PartidoRespuestaSerializer
-    permission_classes = [IsAdminUser]
+    permission_classes = [IsAuthenticatedOrReadOnly]
     
 class PartidoPosicionViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = PartidoPosicion.objects.select_related('partido').all()

@@ -21,20 +21,26 @@ class UsuarioRespuestaSerializer(serializers.ModelSerializer):
         fields = ['pregunta', 'valor'] # No incluimos sesion aquí porque se suele enviar en el contexto
 
 class UsuarioSesionSerializer(serializers.ModelSerializer):
+    usuario_id = serializers.PrimaryKeyRelatedField(
+        source='usuario', 
+        read_only=True, 
+        allow_null=True
+    )
+    
     respuestas = UsuarioRespuestaSerializer(many=True, read_only=True)
 
     class Meta:
         model = UsuarioSesion
         fields = [ 
             'token', 
-            'usuario',
+            'usuario_id',
+            'eleccion',
             'resultado_x',
             'resultado_y', 
             'completado',
             'fecha',
-            'respuestas'  # <--- Faltaba agregarlo aquí
+            'respuestas'
         ]
-        # También agrégalo a read_only para que el POST inicial no lo pida
         read_only_fields = ['token', 'resultado_x', 'resultado_y', 'fecha', 'respuestas']
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):

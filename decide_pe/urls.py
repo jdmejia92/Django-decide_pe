@@ -17,9 +17,9 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from rest_framework import routers
-from core.views import PartidoViewSet, EleccionViewSet, UsuarioViewSet
+from core.views import PartidoViewSet, EleccionViewSet, UsuarioViewSet, RegionViewSet
 from quiz.views import PreguntaViewSet, UsuarioSesionViewSet, UsuarioRespuestaViewSet
-from dashboard.views import AdminStatsView, ImportarPartidosView, ImportarSoloRespuestasView, ImportarPreguntasView
+from dashboard.views import AdminStatsView, ImportarPartidosView, ImportarSoloRespuestasView, ImportarPreguntasView, ImportarCandidatosView, ImportarMetadataView
 from rest_framework_simplejwt.views import TokenRefreshView
 from quiz.views import MyTokenObtainPairView, RespuestaPartidoViewSet, PartidoPosicionViewSet, MetricsDashboardView, ComparisonTableView
 
@@ -27,21 +27,26 @@ router = routers.DefaultRouter()
 router.register(r'partidos', PartidoViewSet)
 router.register(r'elecciones', EleccionViewSet)
 router.register(r'preguntas', PreguntaViewSet, basename='pregunta')
-router.register(r'sesiones', UsuarioSesionViewSet)
+router.register(r'quiz', UsuarioSesionViewSet, basename='quiz')
 router.register(r'usuarios', UsuarioViewSet)
 router.register(r'respuestas_usuario', UsuarioRespuestaViewSet)
 router.register(r'respuestas-partidos', RespuestaPartidoViewSet)
 router.register(r'partido-posiciones', PartidoPosicionViewSet, basename='partidoposicion')
-router.register(r'posiciones', PartidoPosicionViewSet, basename='posiciones')
-
+router.register(r'regiones', RegionViewSet)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/', include(router.urls)), # Todas las rutas automáticas
+    
+    # Agrupamos todo bajo /api/ para que sea ordenado
+    path('api/', include(router.urls)), 
+    
+    # Endpoints de Dashboard y Auth
     path('api/dashboard/stats/', AdminStatsView.as_view()),
     path('api/dashboard/importar-partidos/', ImportarPartidosView.as_view()),
     path('api/dashboard/importar-respuestas/', ImportarSoloRespuestasView.as_view()),
     path('api/dashboard/importar-preguntas/', ImportarPreguntasView.as_view()),
+    path('api/dashboard/importar-candidatos/', ImportarCandidatosView.as_view()),
+    path('api/dashboard/importar-metadata/', ImportarMetadataView.as_view(), name='importar-metadata'),
     path('api/login/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/metrics/', MetricsDashboardView.as_view(), name='metrics'),

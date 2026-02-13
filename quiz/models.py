@@ -37,6 +37,7 @@ class UsuarioSesion(models.Model):
     resultado_x = models.DecimalField(max_digits=5, decimal_places=2, null=True)
     resultado_y = models.DecimalField(max_digits=5, decimal_places=2, null=True)
     completado = models.BooleanField(default=False)
+    eleccion = models.ForeignKey('core.Eleccion', on_delete=models.SET_NULL, null=True, blank=True)
 
     def save(self, *args, **kwargs):
         if not self.token:

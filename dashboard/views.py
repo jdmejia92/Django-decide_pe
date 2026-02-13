@@ -2,10 +2,11 @@ from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser
 from rest_framework.parsers import MultiPartParser
-from core.models import Eleccion, Partido
+from rest_framework import status
+from core.models import Eleccion, Partido, Candidato, Region, PartidoMetadata
 from quiz.models import Pregunta, PartidoRespuesta, PartidoPosicion
-from django.db import transaction
 from quiz.utils import calcular_posicion
+from django.db import transaction
 import io
 import csv
 
@@ -181,3 +182,140 @@ class ImportarPreguntasView(APIView):
             })
         except Exception as e:
             return Response({"error": f"Error al importar preguntas: {str(e)}"}, status=500)
+        
+class ImportarCandidatosView(APIView):
+    def post(self, request):
+        archivo = request.FILES.get('archivo')
+        
+        if not archivo or not archivo.name.endswith('.csv'):
+            return Response({"error": "Sube un archivo CSV válido"}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            # Leer y decodificar el archivo
+            data_set = archivo.read().decode('UTF-8-sig') # 'UTF-8-sig' elimina el BOM de Excel
+            io_string = io.StringIO(data_set)
+            
+            # --- MEJORA: Detección segura de delimitador ---
+            try:
+                primeras_lineas = io_string.read(2048)
+                dialect = csv.Sniffer().sniff(primeras_lineas, delimiters=',;')
+                io_string.seek(0)
+                lector = csv.reader(io_string, dialect)
+            except csv.Error:
+                # Si falla el sniffer, asumimos coma por defecto
+                io_string.seek(0)
+                lector = csv.reader(io_string, delimiter=',')
+            
+            next(lector) # Saltar cabecera
+            
+            contador_nuevos = 0
+            contador_actualizados = 0
+            errores = []
+
+            with transaction.atomic():
+                for i, row in enumerate(lector, start=2):
+                    # Ignorar filas vacías o mal formadas
+                    if not row or len(row) < 8:
+                        continue
+                    
+                    try:
+                        # Limpiar espacios de cada columna
+                        nombres, apellidos, cargo, numero, sigla_partido, nombre_region, foto, hojavida = [col.strip() for col in row[:8]]
+
+                        # Buscar Partido y Región
+                        partido = Partido.objects.get(sigla__iexact=sigla_partido)
+                        region = Region.objects.filter(nombre__icontains=nombre_region).first() if nombre_region else None
+
+                        # Evitar duplicados con update_or_create
+                        candidato, created = Candidato.objects.update_or_create(
+                            nombres=nombres,
+                            apellidos=apellidos,
+                            cargo=cargo,
+                            partido=partido, # Agregamos partido al criterio de búsqueda por seguridad
+                            defaults={
+                                'numero': int(numero) if numero and numero.isdigit() else None,
+                                'region_rel': region,
+                                'foto': foto,
+                                'hojavida': hojavida
+                            }
+                        )
+                        
+                        if created:
+                            contador_nuevos += 1
+                        else:
+                            contador_actualizados += 1
+                            
+                    except Partido.DoesNotExist:
+                        errores.append(f"Fila {i}: Partido '{sigla_partido}' no existe.")
+                    except Exception as e:
+                        errores.append(f"Fila {i}: {str(e)}")
+
+            return Response({
+                "message": f"Proceso completado. {contador_nuevos} nuevos, {contador_actualizados} actualizados.",
+                "errores": errores
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": f"Error al leer el archivo: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
+class ImportarMetadataView(APIView):
+    def post(self, request):
+        archivo = request.FILES.get('archivo')
+        
+        if not archivo or not archivo.name.endswith('.csv'):
+            return Response({"error": "Sube un archivo CSV válido en la key 'archivo'"}, status=400)
+
+        try:
+            data_set = archivo.read().decode('UTF-8-sig')
+            io_string = io.StringIO(data_set)
+            
+            # Detectar delimitador (coma o punto y coma)
+            try:
+                dialect = csv.Sniffer().sniff(io_string.read(1024), delimiters=',;')
+                io_string.seek(0)
+                lector = csv.reader(io_string, dialect)
+            except:
+                io_string.seek(0)
+                lector = csv.reader(io_string, delimiter=',')
+
+            next(lector) # Saltar cabecera
+            
+            procesados = 0
+            errores = []
+
+            with transaction.atomic():
+                for i, row in enumerate(lector, start=2):
+                    if not row or len(row) < 1: continue
+                    
+                    try:
+                        # Estructura: sigla, candidato, lider, color, logo, cand_key, anio, tipo
+                        sigla, candidato, lider, color, logo, cand_key, anio, tipo = [col.strip() for col in row]
+
+                        partido = Partido.objects.get(sigla__iexact=sigla)
+
+                        PartidoMetadata.objects.update_or_create(
+                            partido=partido,
+                            defaults={
+                                'candidato_presidencial': candidato,
+                                'lider_partido': lider,
+                                'color_primario': color if color else '#000000',
+                                'logo_key': logo,
+                                'candidato_key': cand_key if cand_key else 'DEFAULT_CANDIDATE',
+                                'anio_fundacion': int(anio) if anio and anio.isdigit() else None,
+                                'tipo_organizacion': tipo if tipo else 'Partido Político'
+                            }
+                        )
+                        procesados += 1
+                    except Partido.DoesNotExist:
+                        errores.append(f"Fila {i}: Sigla '{sigla}' no existe en la tabla Partido.")
+                    except Exception as e:
+                        errores.append(f"Fila {i}: {str(e)}")
+
+            return Response({
+                "status": "proceso completado",
+                "metadata_procesada": procesados,
+                "errores": errores
+            }, status=status.HTTP_200_OK)
+
+        except Exception as e:
+            return Response({"error": f"Error crítico: {str(e)}"}, status=500)
