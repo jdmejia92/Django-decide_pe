@@ -3,12 +3,12 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser
 from rest_framework.parsers import MultiPartParser
 from core.models import Eleccion, Partido
-from quiz.models import Pregunta, PartidoRespuesta
+from quiz.models import Pregunta, PartidoRespuesta, PartidoPosicion
 from django.db import transaction
+from quiz.utils import calcular_posicion
 import io
 import csv
 
-# --- 1. VISTA DE ESTADÍSTICAS ---
 class AdminStatsView(APIView):
     permission_classes = [IsAdminUser]
     def get(self, request):
@@ -19,7 +19,6 @@ class AdminStatsView(APIView):
         }
         return Response(data)
 
-# --- 2. Importar PARTIDOS (Catálogo) ---
 class ImportarPartidosView(APIView):
     permission_classes = [IsAdminUser]
     parser_classes = [MultiPartParser]
@@ -59,8 +58,7 @@ class ImportarPartidosView(APIView):
         except Exception as e:
             return Response({"error": f"Error en Partidos: {str(e)}"}, status=500)
 
-# --- 3. importar RESPUESTAS DE PARTIDOS (Módulo Adicional) ---
-from core.models import Eleccion # Asegúrate de importar el modelo Eleccion
+from core.models import Eleccion
 
 class ImportarSoloRespuestasView(APIView):
     permission_classes = [IsAdminUser]
@@ -68,74 +66,118 @@ class ImportarSoloRespuestasView(APIView):
 
     def post(self, request):
         archivo = request.FILES.get('archivo')
-        # Obtenemos el año desde el cuerpo de la petición
         anio_eleccion = request.data.get('eleccion') 
 
-        if not archivo: 
-            return Response({"error": "Falta archivo"}, status=400)
-        
-        if not anio_eleccion:
-            return Response({"error": "Debe especificar el año de la elección (ej: 2026)"}, status=400)
+        if not archivo or not anio_eleccion: 
+            return Response({"error": "Faltan datos (archivo o eleccion)"}, status=400)
 
         try:
-            # Buscamos la elección por año
+            # 1. Validamos la elección
             eleccion_obj = Eleccion.objects.filter(anio=anio_eleccion).first()
             if not eleccion_obj:
-                return Response({"error": f"No existe una elección registrada para el año {anio_eleccion}"}, status=404)
+                return Response({"error": f"No existe la elección registrada para el año {anio_eleccion}"}, status=404)
 
             decoded_file = archivo.read().decode('utf-8-sig')
             reader = csv.DictReader(io.StringIO(decoded_file))
-            count = 0
             
+            count = 0
+            partidos_afectados = set()
+
             with transaction.atomic():
                 for row in reader:
-                    pregunta = Pregunta.objects.filter(id=row['pregunta']).first()
-                    partido = Partido.objects.filter(id=row['partido']).first()
+                    # 2. Buscamos la pregunta por ID (dentro de la elección correcta)
+                    pregunta = Pregunta.objects.filter(texto__iexact=row['pregunta_texto'].strip(), eleccion=eleccion_obj).first()
+                    
+                    # 3. Buscamos el partido por NOMBRE o SIGLA (ignora mayúsculas/minúsculas)
+                    nombre_partido = row['partido'].strip()
+                    partido = Partido.objects.filter(nombre__iexact=nombre_partido).first()
+                    if not partido:
+                        partido = Partido.objects.filter(sigla__iexact=nombre_partido).first()
                     
                     if pregunta and partido:
-                        # Ahora incluimos la elección tanto para buscar como para crear
+                        # 4. Crear o actualizar la respuesta
                         PartidoRespuesta.objects.update_or_create(
                             pregunta=pregunta,
                             partido=partido,
-                            eleccion=eleccion_obj, # <--- Relación agregada
                             defaults={
                                 'valor': int(row['valor']),
                                 'fuente': row.get('fuente', '')
                             }
                         )
                         count += 1
-            
-            return Response({"status": "Éxito", "msg": f"Se actualizaron {count} respuestas para la elección {anio_eleccion}."})
+                        partidos_afectados.add(partido)
+
+                # 5. Recalcular caché de posiciones al finalizar la carga
+                for p in partidos_afectados:
+                    self.actualizar_posicion_cache(p, eleccion_obj)
+
+            return Response({
+                "status": "Éxito", 
+                "msg": f"Se procesaron {count} respuestas. Se actualizó la posición de {len(partidos_afectados)} partidos."
+            })
         except Exception as e:
             return Response({"error": str(e)}, status=500)
 
-# --- 4. Importar todo (Carga Masiva de Elección) ---
-class ImportarTodoView(APIView):
+    def actualizar_posicion_cache(self, partido, eleccion):
+        """
+        Calcula el promedio de las respuestas del partido y guarda su posición.
+        """
+        respuestas = PartidoRespuesta.objects.filter(
+            partido=partido, 
+            pregunta__eleccion=eleccion
+        )
+        
+        if respuestas.exists():
+            posX, posY = calcular_posicion(respuestas)
+            
+            PartidoPosicion.objects.update_or_create(
+                partido=partido,
+                defaults={
+                    'posicion_x': posX,
+                    'posicion_y': posY
+                }
+            )
+        
+class ImportarPreguntasView(APIView):
     permission_classes = [IsAdminUser]
     parser_classes = [MultiPartParser]
+
     def post(self, request):
         archivo = request.FILES.get('archivo')
-        anio = request.data.get('anio')
-        if not archivo or not anio: return Response({"error": "Faltan datos"}, status=400)
+        anio_eleccion = request.data.get('anio') # El año para asociar las preguntas
+
+        if not archivo or not anio_eleccion:
+            return Response({"error": "Faltan datos: archivo y anio son requeridos"}, status=400)
+
         try:
+            # Buscamos la elección
+            eleccion_obj = Eleccion.objects.filter(anio=anio_eleccion).first()
+            if not eleccion_obj:
+                return Response({"error": f"No existe elección para el año {anio_eleccion}"}, status=404)
+
             decoded_file = archivo.read().decode('utf-8-sig')
             reader = csv.DictReader(io.StringIO(decoded_file))
-            eleccion = Eleccion.objects.get(anio=anio)
+            
+            creadas = 0
+            
             with transaction.atomic():
                 for row in reader:
-                    pregunta, _ = Pregunta.objects.update_or_create(
-                        texto=row['texto'], eleccion=eleccion,
-                        defaults={'eje': row['eje'], 'direccion': int(row['direccion']), 'categoria': row['categoria']}
+                    # Usamos update_or_create para evitar duplicar preguntas si se sube el CSV dos veces
+                    Pregunta.objects.update_or_create(
+                        texto=row['texto'],
+                        eleccion=eleccion_obj,
+                        defaults={
+                            'eje': row['eje'].upper(), # 'X' o 'Y'
+                            'direccion': int(row['direccion']), # 1 o -1
+                            'categoria': row.get('categoria', 'General'), # Evita el error de null
+                            'estado': row.get('estado', 'activa')
+                        }
                     )
-                    for key, value in row.items():
-                        if key.startswith('valor_') and value:
-                            sigla = key.replace('valor_', '')
-                            partido = Partido.objects.filter(nombre__icontains=sigla).first()
-                            if partido:
-                                PartidoRespuesta.objects.update_or_create(
-                                    pregunta=pregunta, partido=partido,
-                                    defaults={'valor': int(value), 'fuente': row.get(f'fuente_{sigla}', '')}
-                                )
-            return Response({"status": "Éxito", "msg": "Carga masiva completa"})
+                    creadas += 1
+            
+            return Response({
+                "status": "Éxito", 
+                "msg": f"Se importaron {creadas} preguntas para la elección {anio_eleccion}."
+            })
         except Exception as e:
-            return Response({"error": str(e)}, status=500)
+            return Response({"error": f"Error al importar preguntas: {str(e)}"}, status=500)

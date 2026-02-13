@@ -19,9 +19,9 @@ from django.urls import path, include
 from rest_framework import routers
 from core.views import PartidoViewSet, EleccionViewSet, UsuarioViewSet
 from quiz.views import PreguntaViewSet, UsuarioSesionViewSet, UsuarioRespuestaViewSet
-from dashboard.views import AdminStatsView, ImportarPartidosView, ImportarSoloRespuestasView, ImportarTodoView
+from dashboard.views import AdminStatsView, ImportarPartidosView, ImportarSoloRespuestasView, ImportarPreguntasView
 from rest_framework_simplejwt.views import TokenRefreshView
-from quiz.views import MyTokenObtainPairView, RespuestaPartidoViewSet, PartidoPosicionViewSet
+from quiz.views import MyTokenObtainPairView, RespuestaPartidoViewSet, PartidoPosicionViewSet, MetricsDashboardView, ComparisonTableView
 
 router = routers.DefaultRouter()
 router.register(r'partidos', PartidoViewSet)
@@ -32,6 +32,7 @@ router.register(r'usuarios', UsuarioViewSet)
 router.register(r'respuestas_usuario', UsuarioRespuestaViewSet)
 router.register(r'respuestas-partidos', RespuestaPartidoViewSet)
 router.register(r'partido-posiciones', PartidoPosicionViewSet, basename='partidoposicion')
+router.register(r'posiciones', PartidoPosicionViewSet, basename='posiciones')
 
 
 urlpatterns = [
@@ -40,7 +41,9 @@ urlpatterns = [
     path('api/dashboard/stats/', AdminStatsView.as_view()),
     path('api/dashboard/importar-partidos/', ImportarPartidosView.as_view()),
     path('api/dashboard/importar-respuestas/', ImportarSoloRespuestasView.as_view()),
-    path('api/dashboard/importar-todo/', ImportarTodoView.as_view()),
+    path('api/dashboard/importar-preguntas/', ImportarPreguntasView.as_view()),
     path('api/login/', MyTokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    path('api/metrics/', MetricsDashboardView.as_view(), name='metrics'),
+    path('api/comparison/', ComparisonTableView.as_view(), name='comparison-table'),
 ]

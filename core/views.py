@@ -17,7 +17,6 @@ class UsuarioViewSet(viewsets.ModelViewSet):
 class PartidoViewSet(viewsets.ModelViewSet):
     queryset = Partido.objects.all()
     serializer_class = PartidoSerializer
-    # Cualquiera puede ver partidos, solo admin puede editarlos
     permission_classes = [IsAuthenticatedOrReadOnly]
 
 class EleccionViewSet(viewsets.ModelViewSet):
