@@ -1,22 +1,39 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser
-from django.contrib.auth.models import UserManager
+from django.contrib.auth.models import BaseUserManager
 
-class CustomUserManager(UserManager):
-    def create_superuser(self, username, email=None, password=None, **extra_fields):
-        extra_fields.setdefault('rol', 'admin')
+class CustomUserManager(BaseUserManager):
+    def create_user(self, email, password=None, **extra_fields):
+        if not email:
+            raise ValueError('El email es obligatorio')
+        email = self.normalize_email(email)
+        user = self.model(email=email, **extra_fields)
+        user.set_password(password)
+        user.save()
+        return user
+
+    def create_superuser(self, email, password=None, **extra_fields):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
-        return super().create_superuser(username, email, password, **extra_fields)
+        extra_fields.setdefault('rol', 'admin')
+        return self.create_user(email, password, **extra_fields)
     
 class Usuario(AbstractUser):
     ROLES = (
         ('user', 'Usuario'),
         ('admin', 'Administrador'),
     )
-    # db_column='rol' para asegurar que coincida con tu SQL
+    
+    # Configuramos el email como único y obligatorio
+    email = models.EmailField(unique=True, db_column='email') 
+    
     rol = models.CharField(max_length=20, choices=ROLES, default='user', db_column='rol')
     nombre_completo = models.CharField(max_length=100, db_column='nombre', blank=True, null=True)
+    
+    # CAMBIO CLAVE: Esto elimina el error "username is required"
+    USERNAME_FIELD = 'email' 
+    REQUIRED_FIELDS = ['username'] # 'username' pasa a ser un campo extra (o déjalo vacío [])
+
     objects = CustomUserManager()
 
 class Region(models.Model):
