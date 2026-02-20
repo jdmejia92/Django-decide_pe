@@ -55,7 +55,7 @@ class PartidoMetadata(models.Model):
     candidato_presidencial = models.CharField(max_length=100, blank=True, null=True)
     lider_partido = models.CharField(max_length=100, blank=True, null=True)
     color_primario = models.CharField(max_length=7, default='#000000')
-    logo_key = models.CharField(max_length=50)
+    plan_gobierno = models.URLField(max_length=500, blank=True, null=True)
     candidato_key = models.CharField(max_length=50, default='DEFAULT_CANDIDATE')
     anio_fundacion = models.IntegerField(blank=True, null=True) # SQL utiliza tipo YEAR
     tipo_organizacion = models.CharField(max_length=50, default='Partido Político')
