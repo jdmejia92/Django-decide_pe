@@ -15,6 +15,7 @@ from rest_framework_simplejwt.views import TokenObtainPairView
 
 class PreguntaViewSet(viewsets.ModelViewSet):
     serializer_class = PreguntaSerializer
+    permission_classes = [AllowAny]
     
     def get_queryset(self):
         queryset = Pregunta.objects.all()
