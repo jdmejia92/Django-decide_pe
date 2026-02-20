@@ -34,6 +34,30 @@ class UsuarioSesionViewSet(viewsets.ModelViewSet):
         if self.action in ['create', 'answers', 'finalizar_test', 'matches', 'retrieve']:
             return [AllowAny()]
         return [IsAdminUser()]
+    
+    def perform_create(self, serializer):
+        from core.models import Eleccion, Usuario
+        
+        # 1. Obtener usuario si viene en el JSON
+        usuario_id = self.request.data.get('usuario_id')
+        usuario = Usuario.objects.filter(id=usuario_id).first() if usuario_id else None
+
+        # 2. Buscar elección actual con respaldo (Fallback)
+        # Primero busca la marcada como actual, si no hay, toma la del año más reciente
+        eleccion_activa = (
+            Eleccion.objects.filter(actual=True).first() or 
+            Eleccion.objects.order_by('-anio').first()
+        )
+        
+        # 3. Validación de seguridad
+        if not eleccion_activa:
+            from rest_framework import serializers
+            raise serializers.ValidationError(
+                {"error": "No se encontró ninguna elección configurada en la base de datos."}
+            )
+        
+        # 4. Guardar con los objetos reales
+        serializer.save(usuario=usuario, eleccion=eleccion_activa)
 
     @action(detail=False, methods=['post'], url_path='answers')
     def answers(self, request):

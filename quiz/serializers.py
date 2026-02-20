@@ -34,14 +34,15 @@ class UsuarioSesionSerializer(serializers.ModelSerializer):
         fields = [ 
             'token', 
             'usuario_id',
-            'eleccion',
+            'eleccion_id',
             'resultado_x',
             'resultado_y', 
             'completado',
             'fecha',
             'respuestas'
         ]
-        read_only_fields = ['token', 'resultado_x', 'resultado_y', 'fecha', 'respuestas']
+        # 'eleccion' debe estar aquí para que el POST de React no falle al no enviarlo
+        read_only_fields = ['token', 'resultado_x', 'resultado_y', 'fecha', 'respuestas', 'eleccion_id']
 
 class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
     @classmethod
