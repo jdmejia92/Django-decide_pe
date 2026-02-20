@@ -17,7 +17,7 @@ email = 'admin@correo.com'
 
 if not User.objects.filter(username=username).exists():
     if password:
-        User.objects.create_superuser(username, email, password)
+        User.objects.create_superuser(username=username, email=email, password=password)
         print(f'Superusuario "{username}" creado exitosamente.')
     else:
         print('Error: DJANGO_SUPERUSER_PASSWORD no está configurada.')
