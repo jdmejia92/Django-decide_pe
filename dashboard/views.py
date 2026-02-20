@@ -6,6 +6,7 @@ from rest_framework import status
 from core.models import Eleccion, Partido, Candidato, Region, PartidoMetadata
 from quiz.models import Pregunta, PartidoRespuesta, PartidoPosicion
 from quiz.utils import calcular_posicion
+from core.serializers import PartidoMetadataImportSerializer
 from django.db import transaction
 import io
 import csv
@@ -263,59 +264,76 @@ class ImportarMetadataView(APIView):
         archivo = request.FILES.get('archivo')
         
         if not archivo or not archivo.name.endswith('.csv'):
-            return Response({"error": "Sube un archivo CSV válido en la key 'archivo'"}, status=400)
+            return Response({"error": "Sube un archivo CSV válido"}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            data_set = archivo.read().decode('UTF-8-sig')
+            data_set = archivo.read().decode('utf-8-sig')
             io_string = io.StringIO(data_set)
             
-            # Detectar delimitador (coma o punto y coma)
+            # Detección de delimitador
             try:
-                dialect = csv.Sniffer().sniff(io_string.read(1024), delimiters=',;')
+                sample = io_string.read(2048)
+                dialect = csv.Sniffer().sniff(sample, delimiters=',;')
                 io_string.seek(0)
                 lector = csv.reader(io_string, dialect)
-            except:
+            except Exception:
                 io_string.seek(0)
                 lector = csv.reader(io_string, delimiter=',')
 
-            next(lector) # Saltar cabecera
+            next(lector, None) # Saltar cabecera
             
             procesados = 0
             errores = []
 
             with transaction.atomic():
                 for i, row in enumerate(lector, start=2):
-                    if not row or len(row) < 1: continue
+                    if not row or len(row) < 1:
+                        continue
                     
                     try:
-                        # Estructura: sigla, candidato, lider, color, logo, cand_key, anio, tipo
-                        sigla, candidato, lider, color, logo, cand_key, anio, tipo = [col.strip() for col in row]
-
+                        # Extraer datos del CSV (ajusta el orden si es necesario)
+                        # sigla, candidato, lider, color, plan_url, cand_key, anio, tipo
+                        sigla = row[0].strip()
+                        
+                        # Buscamos el objeto Partido por sigla
                         partido = Partido.objects.get(sigla__iexact=sigla)
 
-                        PartidoMetadata.objects.update_or_create(
-                            partido=partido,
-                            defaults={
-                                'candidato_presidencial': candidato,
-                                'lider_partido': lider,
-                                'color_primario': color if color else '#000000',
-                                'logo_key': logo,
-                                'candidato_key': cand_key if cand_key else 'DEFAULT_CANDIDATE',
-                                'anio_fundacion': int(anio) if anio and anio.isdigit() else None,
-                                'tipo_organizacion': tipo if tipo else 'Partido Político'
-                            }
-                        )
-                        procesados += 1
+                        # Preparamos los datos para el Serializer
+                        datos_fila = {
+                            'partido': partido.id,
+                            'candidato_presidencial': row[1].strip() if len(row) > 1 else None,
+                            'lider_partido': row[2].strip() if len(row) > 2 else None,
+                            'color_primario': row[3].strip() if len(row) > 3 and row[3] else '#000000',
+                            'plan_gobierno': row[4].strip() if len(row) > 4 else None,
+                            'candidato_key': row[5].strip() if len(row) > 5 and row[5] else 'DEFAULT_CANDIDATE',
+                            'anio_fundacion': int(row[6].strip()) if len(row) > 6 and row[6].strip().isdigit() else None,
+                            'tipo_organizacion': row[7].strip() if len(row) > 7 and row[7] else 'Partido Político'
+                        }
+
+                        # Instanciamos el Serializer para validar
+                        serializer = PartidoMetadataImportSerializer(data=datos_fila)
+                        
+                        if serializer.is_valid():
+                            # Usamos update_or_create con los datos ya validados
+                            PartidoMetadata.objects.update_or_create(
+                                partido=partido,
+                                defaults=serializer.validated_data
+                            )
+                            procesados += 1
+                        else:
+                            # Capturamos errores de validación (ej: URL mal formada)
+                            errores.append(f"Fila {i} ({sigla}): {serializer.errors}")
+
                     except Partido.DoesNotExist:
-                        errores.append(f"Fila {i}: Sigla '{sigla}' no existe en la tabla Partido.")
+                        errores.append(f"Fila {i}: La sigla '{sigla}' no existe.")
                     except Exception as e:
-                        errores.append(f"Fila {i}: {str(e)}")
+                        errores.append(f"Fila {i}: Error -> {str(e)}")
 
             return Response({
                 "status": "proceso completado",
                 "metadata_procesada": procesados,
                 "errores": errores
-            }, status=status.HTTP_200_OK)
+            }, status=status.HTTP_200_OK if not errores else status.HTTP_207_MULTI_STATUS)
 
         except Exception as e:
-            return Response({"error": f"Error crítico: {str(e)}"}, status=500)
+            return Response({"error": f"Error crítico: {str(e)}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

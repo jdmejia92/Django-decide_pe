@@ -84,6 +84,6 @@ class PartidoMetadataImportSerializer(serializers.ModelSerializer):
         model = PartidoMetadata
         fields = [
             'partido', 'candidato_presidencial', 'lider_partido', 
-            'color_primario', 'logo_key', 'candidato_key', 
+            'color_primario', 'plan_gobierno', 'candidato_key', 
             'anio_fundacion', 'tipo_organizacion'
         ]
