@@ -45,33 +45,28 @@ class PartidoSerializer(serializers.ModelSerializer):
 
 class UsuarioSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True)
-    # Hacemos el email explícitamente requerido
     email = serializers.EmailField(required=True)
+    username = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
         model = Usuario
-        # Mantenemos username por compatibilidad interna de Django, 
-        # pero el foco principal es el email.
         fields = ['id', 'username', 'email', 'password', 'rol', 'nombre_completo']
         read_only_fields = ['rol']
 
     def validate_email(self, value):
-        # Validamos que el email no esté duplicado
+        # Mantenemos tu validación de duplicados
         if Usuario.objects.filter(email=value).exists():
             raise serializers.ValidationError("Este correo ya está registrado.")
         return value
 
     def create(self, validated_data):
         password = validated_data.pop('password')
-        
-        # Si tu frontend no envía un 'username', usamos la primera parte del email
+
         if not validated_data.get('username'):
-            validated_data['username'] = validated_data['email'].split('@')[0]
+            email_part = validated_data['email'].split('@')[0]
+            validated_data['username'] = email_part
             
-        user = Usuario(**validated_data)
-        user.set_password(password)
-        user.save()
-        return user
+        return Usuario.objects.create_user(password=password, **validated_data)
 
 
 class EleccionSerializer(serializers.ModelSerializer):

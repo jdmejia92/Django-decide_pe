@@ -3,8 +3,8 @@ from rest_framework.response import Response
 from rest_framework.permissions import IsAdminUser
 from rest_framework.parsers import MultiPartParser
 from rest_framework import status
-from core.models import Eleccion, Partido, Candidato, Region, PartidoMetadata
-from quiz.models import Pregunta, PartidoRespuesta, PartidoPosicion
+from core.models import Eleccion, Partido, Candidato, Region, PartidoMetadata, Usuario
+from quiz.models import Pregunta, PartidoRespuesta, PartidoPosicion, UsuarioSesion
 from quiz.utils import calcular_posicion
 from core.serializers import PartidoMetadataImportSerializer
 from django.db import transaction
@@ -15,9 +15,11 @@ class AdminStatsView(APIView):
     permission_classes = [IsAdminUser]
     def get(self, request):
         data = {
+            "total_usuarios": Usuario.objects.count(),
             "total_partidos": Partido.objects.count(),
             "total_preguntas": Pregunta.objects.count(),
-            "elecciones": Eleccion.objects.values('nombre', 'anio', 'actual')
+            "elecciones": Eleccion.objects.values('nombre', 'anio', 'actual'),
+            "quizzes_completados": UsuarioSesion.objects.filter(completado=True).count(),
         }
         return Response(data)
 
